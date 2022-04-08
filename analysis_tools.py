@@ -1,12 +1,3 @@
-# The first (very long) part defines linear combinations of gaussians (1 up to 60) and a dictionary where the functions are stored with the corresponding number (int) of gaussians as key (e.g. 1: gaus, 2:gaus2, 3:gaus3 ...)
-# 
-# 
-# 
-# 
-# 
-# 
-
-
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -43,6 +34,7 @@ class analysis():
         self.peak_width      = 1
         self.fit_range       = [0,-1] # define the range in which you want to fit
         self.noise_peak      = None # noise peak position
+        self.xlim            = [900,1200]
         if file:
             self.file        = file
         else:
@@ -72,7 +64,8 @@ class analysis():
         # find the peaks in the histogram
         self.peaks, self.peak_prop = find_peaks(self.hist,distance=self.peak_distance,prominence=self.peak_prominence,height=self.peak_height,width=self.peak_width)
         self.n_peaks               = len(self.peaks)
-        
+    
+    
     def fit_peaks(self):
         # create p0 and bounds and fit peaks based on the find_peaks results
         
@@ -87,8 +80,8 @@ class analysis():
         self.p0 = [i for j in p0 for i in j]
         self.bounds = [bounds_lower,bounds_upper]
             
-        self.popt, self.pcov = curve_fit(gaus_func[self.n_peaks],self.bin_center[self.fit_range[0]:self.fit_range[1]],self.hist[self.fit_range[0]:self.fit_range[1]],
-                                         p0=self.p0,bounds=self.bounds,maxfev=100000)
+        self.popt, self.pcov = curve_fit(gauss,self.bin_center[self.fit_range[0]:self.fit_range[1]],self.hist[self.fit_range[0]:self.fit_range[1]],
+                                         p0=self.p0,bounds=self.bounds,maxfev=100000)#_func[self.n_peaks]
         
     def analyse(self,load = False):
         if load:
@@ -114,7 +107,17 @@ class analysis():
         self.gain                = self.gain_popt[0]
         self.noise_pos_from_fit  = linear(-self.first_photon_number,*self.gain_popt)
         
-        
+    
+    def plot_data(self):
+        fig, ax = plt.subplots(1,2)
+        for i in ax:
+            i.hist(self.data,bins=self.bins)
+            i.plot(self.x,gauss(self.x,*self.popt))
+            i.set_xlim(self.xlim)
+            i.set_ylim([1,np.max(self.hist)*1.1])
+        ax[1].set_yscale('log')
+        fig.show()
+    
     def save(self,filename=False):
         if filename == False:
             filename = self.directory

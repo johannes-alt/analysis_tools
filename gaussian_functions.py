@@ -3,6 +3,19 @@ import numpy as np
 def linear(x,m,c):
     return m*x + c
 
+
+def gauss(x,*params):
+    
+    g = 0
+    
+    for i in range(0,len(params),3):
+        g += params[i] * np.exp(-(x-params[i+1])**2/(2*params[i+2]**2))
+        
+    return g
+
+
+
+
 def gaus(x,A,mu,sig):
     return A*np.exp(-(x-mu)**2/(2*sig**2))
 
@@ -952,3 +965,5 @@ gaus_func = {1 :gaus  ,2 :gaus2 ,3 :gaus3 ,4 :gaus4 ,5 :gaus5 ,6 :gaus6 ,
              49:gaus49,59:gaus59,51:gaus51,52:gaus52,53:gaus53,54:gaus54,
              55:gaus55,56:gaus56,57:gaus57,58:gaus58,59:gaus59,60:gaus60
              }
+
+
