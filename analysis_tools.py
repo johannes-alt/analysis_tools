@@ -4,8 +4,21 @@ import os
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 import csv
-from gaussian_functions import *
+import pickle
 
+
+def linear(x,m,c):
+    return m*x + c
+
+
+def gauss(x,*params):
+    
+    g = 0
+    
+    for i in range(0,len(params),3):
+        g += params[i] * np.exp(-(x-params[i+1])**2/(2*params[i+2]**2))
+        
+    return g
 
 def retrieve_name(var):
         """
@@ -23,18 +36,49 @@ class analysis():
     # A class to load data, plot data, find peaks and fit peaks
     
     
-    def __init__(self,file=None):
+    def __init__(self,file=None,channel=-1):
+        
+        ####### define bins, bin edges for hist and x linspace for plotting of fits
         self.bins            = np.linspace(0,2**12-1,2**12)-0.5
         self.bins_edges      = np.linspace(0,2**12,2**12+1)-0.5
+        self.bins_center     = np.linspace(0,2**12-1,2**12)
         self.bin_range       = [900,1300]
         self.x               = np.linspace(0,2**12,100000)
+        
+        ####### define peak finding limitations
         self.peak_distance   = 25
         self.peak_prominence = 10
         self.peak_height     = 1
         self.peak_width      = 1
+        
+        #######
         self.fit_range       = [0,-1] # define the range in which you want to fit
         self.noise_peak      = None # noise peak position
-        self.xlim            = [900,1200]
+        self.xlim            = [900,1200] # default xlim for the plots
+        
+        ####### fit stuff: deviation of the mean from the peak finding value and maxfev
+        self.bound_mu        = 10 
+        self.maxfev          = 100000
+        
+        ####### dictionarys for data, hist, fit
+        self.data            = {}
+        self.hist            = {}
+        self.fit             = {}
+        self.peaks           = {}
+        self.peak_prop       = {}
+        self.n_peaks         = {}
+        
+        ####### select channel
+        if (type(channel)!=int) or ((type(channel)==int) and ((channel >=32) or (channel <=-2))) or (type(channel)!=list) or ((type(channel)==list) and not (all(isinstance(i, int) for i in channel))):
+            print('Wierd channel selection')
+            self.ch          = -1
+        elif (type(channel)==int) and (channel!=-1):
+            self.ch              = [channel]
+        else:
+            print('All channels selected')
+            self.ch          = -1
+        
+        ####### file selection
         if file:
             self.file        = file
         else:
@@ -42,46 +86,91 @@ class analysis():
     
     def load_data(self):
         try:
-            self.data = np.genfromtxt(self.file)[1:,2]
+            self.data = np.genfromtxt(self.file)[1:,:]
         except:
             data = []
             with open(self.file) as f:
                 lines = csv.reader((line.replace('\0','') for line in f), delimiter=' ')
                 for row in lines:
                     try:
-                        data.append(row[2])
+                        data.append(row)
                     except:
                         pass
-            self.data = np.array([int(i) for i in data[1:]])
+            data = np.array([int(i) for i in data[1:]])
+            if self.ch == -1:
+                for i in range(32):
+                    self.data[i]  = {'hit':data[3*i],'lg':data[3*i+1],'hg':data[3*i+2]}
+            else:
+                for i in self.ch: # maybe change to range(32) because loading takes time, incase in hindsight one wants to analyse an additional channel
+                    self.data[i]  = {'hit':data[3*i],'lg':data[3*i+1],'hg':data[3*i+2]}
+            self.data['temp'] = data[-1]
             
     def create_hist(self):
         # create the histogram from data
         # maybe plot??? idk
-        self.hist, self.bin_edges = np.histogram(self.data,bins=self.bins_edges)
-        self.bin_center = [(self.bin_edges[i]+self.bin_edges[i+1])/2 for i in range(len(self.bin_edges)-1)]
+        if self.channel == -1:
+            for i in range(32):
+                self.hist[i], _ = np.histogram(self.data,bins=self.bins_edges) # exchanged self.bin_edges through _
+#                 self.bin_center = [(self.bin_edges[i]+self.bin_edges[i+1])/2 for i in range(len(self.bin_edges)-1)]
+        else:
+            for i in self.ch:
+                self.hist[i], _ = np.histogram(self.data,bins=self.bins_edges) # exchanged self.bin_edges through _
+#                 self.bin_center = [(self.bin_edges[i]+self.bin_edges[i+1])/2 for i in range(len(self.bin_edges)-1)]
         
     def find_peaks(self):
         # find the peaks in the histogram
-        self.peaks, self.peak_prop = find_peaks(self.hist,distance=self.peak_distance,prominence=self.peak_prominence,height=self.peak_height,width=self.peak_width)
-        self.n_peaks               = len(self.peaks)
+        if self.ch == -1:
+            for i in range(32):
+                self.peaks[i], self.peak_prop[i] = find_peaks(self.hist[i],distance=self.peak_distance,prominence=self.peak_prominence,height=self.peak_height,width=self.peak_width)
+                self.n_peaks[i]               = len(self.peaks[i])
+        
+        else:
+            for i in self.ch:
+                self.peaks[i], self.peak_prop[i] = find_peaks(self.hist[i],distance=self.peak_distance,prominence=self.peak_prominence,height=self.peak_height,width=self.peak_width)
+                self.n_peaks[i]               = len(self.peaks[i])
     
     
     def fit_peaks(self):
         # create p0 and bounds and fit peaks based on the find_peaks results
+        self.fit['p0']     = {}
+        self.fit['bounds'] = {}
+        self.fit['popt']   = {}
+        self.fit['pcov']   = {}
         
-        p0           = [[self.peak_prop['peak_heights'][i]/2,self.peaks[i],10] for i in range(len(self.peaks))]
+        if self.ch==-1:
+            for i in range(32):
+                p0 = [[self.peak_prop[i]['peak_heights'][j]/2,self.peaks[i][j],10] for j in range(len(self.peaks[i]))]
+
+                bounds_lower = [[0,self.peaks[i][j]-self.bound_mu,0] for j in range(len(self.peaks[i]))]
+                bounds_upper = [[np.inf,self.peaks[i][j]+self.bound_mu,20] for j in range(len(self.peaks[i]))]
+
+                bounds_lower = [k for j in bounds_lower for k in j]
+                bounds_upper = [k for j in bounds_upper for k in j]
+
+                self.fit['p0'][i]     = [k for j in p0 for k in j]
+                self.fit['bounds'][i] = [bounds_lower,bounds_upper]
+
+                self.fit['popt'], self.fit['pcov'] = curve_fit(gauss,self.bin_center[self.fit_range[0]:self.fit_range[1]],self.hist[i][self.fit_range[0]:self.fit_range[1]],
+                                                 p0=self.fit['p0'][i],bounds=self.fit['bounds'][i], maxfev=self.maxfev)#_func[self.n_peaks]
+                
+        else:
+            for i in self.ch:
+                p0 = [[self.peak_prop[i]['peak_heights'][j]/2,self.peaks[i][j],10] for j in range(len(self.peaks[i]))]
+
+                bounds_lower = [[0,self.peaks[i][j]-self.bound_mu,0] for j in range(len(self.peaks[i]))]
+                bounds_upper = [[np.inf,self.peaks[i][j]+self.bound_mu,20] for j in range(len(self.peaks[i]))]
+
+                bounds_lower = [k for j in bounds_lower for k in j]
+                bounds_upper = [k for j in bounds_upper for k in j]
+
+                self.fit['p0'][i]     = [k for j in p0 for k in j]
+                self.fit['bounds'][i] = [bounds_lower,bounds_upper]
+
+                self.fit['popt'], self.fit['pcov'] = curve_fit(gauss,self.bin_center[self.fit_range[0]:self.fit_range[1]],self.hist[i][self.fit_range[0]:self.fit_range[1]],
+                                                 p0=self.fit['p0'][i],bounds=self.fit['bounds'][i],maxfev=self.maxfev)#_func[self.n_peaks]
         
-        bounds_lower = [[0,self.peaks[i]-10,0] for i in range(len(self.peaks))]
-        bounds_upper = [[np.inf,self.peaks[i]+10,20] for i in range(len(self.peaks))]
         
-        bounds_lower = [i for j in bounds_lower for i in j]
-        bounds_upper = [i for j in bounds_upper for i in j]
         
-        self.p0 = [i for j in p0 for i in j]
-        self.bounds = [bounds_lower,bounds_upper]
-            
-        self.popt, self.pcov = curve_fit(gauss,self.bin_center[self.fit_range[0]:self.fit_range[1]],self.hist[self.fit_range[0]:self.fit_range[1]],
-                                         p0=self.p0,bounds=self.bounds,maxfev=100000)#_func[self.n_peaks]
         
     def analyse(self,load = False):
         if load:
@@ -91,16 +180,16 @@ class analysis():
         self.fit_peaks()
         
         
-    def find_first_photon_number(self,cut_last=0):
+    def find_first_photon_number(self,cut_first=0,cut_last=0):
         if not self.noise_peak:
             self.noise_peak = 962
             print(f'Noise peak position assumed to be {self.noise_peak}')
         
         if cut_last == 0:
-            self.gain_popt, self.gain_pcov = curve_fit(linear,np.linspace(0,self.n_peaks-1,self.n_peaks),np.reshape(self.popt,(self.n_peaks,3))[:,1],maxfev=100000)
+            self.gain_popt, self.gain_pcov = curve_fit(linear,np.linspace(cut_first,self.n_peaks-1,self.n_peaks-cut_first),np.reshape(self.popt,(self.n_peaks,3))[cut_first:,1],maxfev=100000)
         
         else:
-            self.gain_popt, self.gain_pcov = curve_fit(linear,np.linspace(0,self.n_peaks-1-cut_last,self.n_peaks-cut_last),np.reshape(self.popt,(self.n_peaks,3))[:-cut_last,1],maxfev=100000)
+            self.gain_popt, self.gain_pcov = curve_fit(linear,np.linspace(cut_first,self.n_peaks-1-cut_last,self.n_peaks-cut_last-cut_first),np.reshape(self.popt,(self.n_peaks,3))[cut_first:-cut_last,1],maxfev=100000)
         
         self.first_photon_number = round((self.gain_popt[1]-self.noise_peak)/self.gain_popt[0])
         
@@ -108,15 +197,45 @@ class analysis():
         self.noise_pos_from_fit  = linear(-self.first_photon_number,*self.gain_popt)
         
     
-    def plot_data(self):
-        fig, ax = plt.subplots(1,2)
-        for i in ax:
-            i.hist(self.data,bins=self.bins)
-            i.plot(self.x,gauss(self.x,*self.popt))
-            i.set_xlim(self.xlim)
-            i.set_ylim([1,np.max(self.hist)*1.1])
-        ax[1].set_yscale('log')
-        fig.show()
+    def plot_data(self,save_plot=False):
+        
+        if self.ch==-1:
+            for i in range(32):
+                fig, ax = plt.subplots(1,2)
+                for i in ax:
+                    i.hist(self.data[i],bins=self.bins)
+                    i.plot(self.x,gauss(self.x,*self.fit['popt'][i]),'r')
+                    i.set_xlim(self.xlim)
+                    i.set_xlabel('Amplitude [ADCu]')
+                    i.set_ylim([1,np.max(self.hist[i])*1.1])
+                ax[1].set_yscale('log')
+                if save_plot!=False:
+                    fig.savefig(save_plot)
+                plt.show()
+                
+        else:
+            for i in self.ch:
+                fig, ax = plt.subplots(1,2)
+                for i in ax:
+                    i.hist(self.data[i],bins=self.bins)
+                    i.plot(self.x,gauss(self.x,*self.fit['popt'][i]),'r')
+                    i.set_xlim(self.xlim)
+                    i.set_xlabel('Amplitude [ADCu]')
+                    i.set_ylim([1,np.max(self.hist[i])*1.1])
+                ax[1].set_yscale('log')
+                if save_plot!=False:
+                    fig.savefig(save_plot)
+                plt.show()
+        
+    def gain_plot(self,dc=False):
+        # plot the mean of the peaks over the peak number and add the linear fit for the gain
+        # add residuum plot
+        
+        fig, [ax,res] = plt.subplots(2,1)
+        
+        ax.plot(np.linspace(self.first_photon_number,np.peaks+self.first_photon_number,np.peaks-1+self.first_photon_number),self.popt[1::3])
+        res.plot(np.linspace(self.first_photon_number,self.n_peaks-1+self.first_photon_number,self.n_peaks),self.popt[1::3]-linear(np.linspace(self.first_photon_number,self.n_peaks-1+self.first_photon_number,self.n_peaks),*self.gain_popt),'o',markersize=1)
+        res.hlines(0,self.first_photon_number,self.n_peaks+self.first_photon_number,'r')
     
     def save(self,filename=False):
         if filename == False:
@@ -126,7 +245,7 @@ class analysis():
     
     @staticmethod
     def load(filename):
-        with open(filename,'rb') as f:
+        with open(filename+'array_save','rb') as f:
             return pickle.load(f)
         
         
