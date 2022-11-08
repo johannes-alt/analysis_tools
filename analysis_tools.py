@@ -32,6 +32,23 @@ def retrieve_name(var):
             if len(names) > 0:
                 return names[0]
 
+            
+def load_chunks(file, output):
+    data = []
+    with open(self.file) as f:
+        lines = csv.reader((line.replace('\0','') for line in f), delimiter=' ')
+        for row in lines:
+            try:
+                data.append(row)
+            except:
+                pass
+    data = [[int(k) for k in j] for j in data[1:]]
+    data = np.array(data[:-1])
+    print('data not loaded with numpy.genfromtxt')
+
+
+
+
 class analysis():
     
     # A class to load data, plot data, find peaks and fit peaks
@@ -54,7 +71,7 @@ class analysis():
         
         #######
         self.fit_range       = [0,-1] # define the range in which you want to fit
-        self.noise_peak      = None # noise peak position
+        self.noise_peak      = 960 # noise peak position
         self.xlim            = [900,1200] # default xlim for the plots
         
         ####### fit stuff: deviation of the mean from the peak finding value and maxfev
@@ -109,7 +126,7 @@ class analysis():
     
     def load_data(self):
         try:
-            data = np.genfromtxt(self.file)[1:,:]
+            data = np.genfromtxt(self.file,skip_header=1)#[1:,:]
             print('data loaded with numpy.genfromtxt')
         except:
             data = []
@@ -137,14 +154,14 @@ class analysis():
         if self.ch == -1:
             for i in range(32):
                 self.hist[i]    = {}
-                self.hist[i]['lg'], self.bin_edges = np.histogram(self.data[i]['lg'],bins=self.bins_edges) # exchanged self.bin_edges through _
-                self.hist[i]['hg'], self.bin_edges = np.histogram(self.data[i]['hg'],bins=self.bins_edges)
+                self.hist[i]['lg'], self.bin_edges = np.histogram(self.data[i]['lg'][np.where(self.data[i]['hit']>=1)],bins=self.bins_edges) # exchanged self.bin_edges through _
+                self.hist[i]['hg'], self.bin_edges = np.histogram(self.data[i]['hg'][np.where(self.data[i]['hit']>=1)],bins=self.bins_edges)
                 self.bin_center = [(self.bin_edges[i]+self.bin_edges[i+1])/2 for i in range(len(self.bin_edges)-1)]
         else:
             for i in self.ch:
                 self.hist[i]    = {}
-                self.hist[i]['lg'], self.bin_edges = np.histogram(self.data[i]['lg'],bins=self.bins_edges) # exchanged self.bin_edges through _
-                self.hist[i]['hg'], self.bin_edges = np.histogram(self.data[i]['hg'],bins=self.bins_edges)
+                self.hist[i]['lg'], self.bin_edges = np.histogram(self.data[i]['lg'][np.where(self.data[i]['hit']>=1)],bins=self.bins_edges) # exchanged self.bin_edges through _
+                self.hist[i]['hg'], self.bin_edges = np.histogram(self.data[i]['hg'][np.where(self.data[i]['hit']>=1)],bins=self.bins_edges)
                 self.bin_center = [(self.bin_edges[i]+self.bin_edges[i+1])/2 for i in range(len(self.bin_edges)-1)]
         
     def find_peaks(self):
@@ -277,7 +294,7 @@ class analysis():
         self.fit_peaks()
         
         
-    def find_first_photon_number(self,cut_first=0,cut_last=0):
+    def find_first_photon_number(self,cut_first=0,cut_last=0,channel=0):
         if not self.noise_peak:
             self.noise_peak = 962
             print(f'Noise peak position assumed to be {self.noise_peak}')
